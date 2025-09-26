@@ -1,6 +1,6 @@
 baseURL = "https://blog.s20n.dev"
 languageCode = "en-us"
-title = "S20n Blog"
+title = "s20n blog"
 
 [module]
   [[module.imports]]
@@ -10,10 +10,17 @@ title = "S20n Blog"
     path = "github.com/shriramters/plague"  # Theme
 
 [params]
-  siteHeaderText = "S20n Blog"
+  siteHeaderText = "s20n blog"
 
   colors = "default"
   
   [params.hcard]
     fullName = "Shriram Ravindranathan"
+    social = [
+      { platform = "github", identity = "shriramters", url_pattern = "https://github.com/%s" },
+      { platform = "bluesky", identity = "s20n.dev", url_pattern = "https://bsky.app/profile/%s" }
+    ]
 
+[caches]
+  [caches.images]
+    dir = ':cacheDir/images'

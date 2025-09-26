@@ -1,0 +1,6 @@
+#+title: Home
+
+Welcome to my blog.
+
+Here are some featured posts:
+- [[posts/how-chordcat-works][How ChordCat Works, A Chord Naming Algorithm]]
