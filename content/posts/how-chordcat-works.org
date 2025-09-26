@@ -1,0 +1,205 @@
+#+TITLE: How Chordcat Works, A Chord Naming Algorithm
+#+DATE: 2024-04-06T10:55:09+05:30
+#+DRAFT: false
+#+DESCRIPTION: A look into the chord-naming algorithm used in chordcat
+#+TAGS[]: music c++
+
+[[/images/chordcat-banner.png]]
+
+[[https://github.com/shriramters/chordcat/][chordcat]] is a chord-naming application and a pet project of mine. It is written
+in C++ and SFML.
+
+At the heart of chordcat is the chord naming algorithm. I and my dear friend [[https://theakash.dev][Akash]]
+came up with this one afternoon and found it rather elegant. The algorithm
+itself is not very complicated but the explanation might be a tad bit
+lengthy. In this blog, I'll try my best to explain how this algorithm works.
+
+All the code presented in this blog is licensed under [[https://www.gnu.org/licenses/gpl-3.0.en.html][GPL-3.0]]
+
+* Basic Theory
+
+A chord can have many names. In fact we could pick any of the notes as the root
+note and come up with a name for the chord. For example, the notes ~C~, ~E~ and
+~G~ (The C major chord) can have any of the following names, based on what is
+considered to be the root note.
+
+| root note | chord name  |
+| C         | C Major     |
+| E         | E Minor #5  |
+| G         | G sus4 (13) |
+
+(To the best of my knowledge, I'm no music theorist)
+
+Also, it does not really matter what octave these notes are played in or whether
+these notes are repeated. For all intents and purposes, we can simply take the
+index of the key pressed on the keyboard (0-88 starting from A) and take the
+modulo of that index with 12 to get our note.
+
+It is also important to know that chords are built on thirds. If we were to go
+up the major scale from the root note in diatonic thirds (alternating notes),
+we'd form chords like 1, 3, 5, 7, 9, 11, 13 (Maj13)
+
+For example, in the C Major scale (~CDEFGABC~), we could pick the alternate
+notes and form this chord (~CEGBDFA~) which is the ~CMaj13~ chord.
+
+And that's about the biggest chord you'll find using this technique because the
+next number after 13, i.e "15", is the root note ~C~ again.
+
+While we were coming up with chordcat, Jake from [[https://signalsmusicstudio.com/][signals music studio]] posted
+[[https://www.youtube.com/watch?v=2SeN9W1CIrI][this excellent video]] on how to name every chord ever. This video came
+extremely in clutch when we were writing this software.
+
+* The Algorithm
+
+First, we get ~indices~, which is the list of indices of all the keys pressed on
+the keyboard (0-88). As discussed in the previous section, we can simply take
+the modulo of these indices with 12 and store them in a set to name our chord
+(no duplicates). We'll call this set "~notes~".
+
+Since we now know that basically any of the played notes could be the root note
+of our chord, we'll need to iterate through all the notes that were played and
+run the chord-naming algorithm once for each note.
+
+This is what is done in the piece of code below. In our chord naming function,
+we've got the second ~for~ loop iterating through each of the notes considering
+each of them the root, one at a time.
+
+#+begin_src c++
+std::multiset<Chord> name_that_chord(const std::vector<size_t>& indices) {
+  std::set<unsigned short> notes = {};
+  for (auto index : indices) {
+      notes.insert(index % 12);
+  }
+  std::multiset<Chord> result = {};
+  for (auto root : notes) {
+      std::set<unsigned short> intervals = {};
+      for (auto other : notes) {
+	  if (other == root)
+	      continue;
+	  intervals.insert(get_note_distance(root, other));
+      }
+      insert_chords(root, intervals, result);
+  }
+  return result;
+}
+#+end_src
+
+Once we consider one of the notes as the root, we can then go ahead and get the
+structure of the chord by calculating the distance of each of the notes in
+relation with the root note. By distance, I mean the number of semitones between
+the two notes. This is stored in a set named "~intervals~".
+
+Once we have the set of intervals, we can then simply lookup this set in our
+database of chord names. [[https://github.com/shriramters/chordcat/blob/main/src/chord_db.hpp][This is a rudimentary "database" of chord names I came
+up with]]. These names will be our "base names". We will have to check our
+intervals set against each of these chords in our database. The missing or
+additional notes will be the accidental notes in the chord (b13, #11 etc..).
+
+Here ~Chord~ is a struct representing the actual chord. We store:
+- root note,
+- extra tones (The notes present in our intervals set but not in the chord
+database entry)
+- omitted tones (The notes present in the database entry but not in our
+  intervals set)
+- num_accidentals (the sum of extra and omitted tones, this is used for sorting)
+
+#+begin_src c++
+struct Chord {
+    unsigned short root;
+    sf::String base_name;
+    std::vector<unsigned short> extra_tones;
+    std::vector<unsigned short> omitted_tones;
+    unsigned num_accidentals;
+
+    // support sorting
+    friend auto operator<=>(Chord const& a, Chord const& b) {
+        return a.num_accidentals <=> b.num_accidentals;
+}
+#+end_src
+
+** Sorting?
+
+Here is another postulate of this algorithm, the chord name that has fewer
+accidentals can be considered a more proper name for the chord.
+
+It is for this reason that we are making our chords sortable by
+~num_accidentals~
+
+For instance, consider the chord ~CEG~. If we consider ~C~ to be the root note,
+we can calculate the interval set to be ~(4, 7)~ (because ~E~ is 4 semitones above
+~C~ and ~G~ is 7 semitones above ~C~).
+
+Running this ~(4,7)~ against our database, we come up with these candidates for names:
+
+| intervals | base name | omitted tones | extra tones | final name                 | num_accidentals |
+| (3,7)     | minor     | (3)           | (4)         | C minor (no b3, add 3)     |               2 |
+| (4,7)     | major     | nil           | nil         | C major                    |               0 |
+| (4,7,10)  | 7         | (10)          | nil         | C7 (no b7)                 |               1 |
+| (4,7,11)  | maj7      | (11)          | nil         | Cmaj7 (no 7)               |               1 |
+| (3,7,10)  | min7      | (3, 11)       | 4           | Cmin7(no b3, no b7, add 3) |               3 |
+
+Clearly, we can see that the names with fewer accidentals are more fitting (in
+our case ~C major~ would be the best name for our set of notes).
+
+These accidentals (difference between our interval set and the chord_db entry)
+are calculated in our ~insert_chords~ function:
+
+#+begin_src c++
+void insert_chords(const unsigned short root, const std::set<unsigned short>& intervals,
+                   std::multiset<Chord>& res) {
+    std::set<Chord> temp;
+    for (auto& [name, notes] : chord_db) {
+        Chord chord = {};
+        chord.root = root;
+        chord.base_name = name;
+
+        // Can be written better using std::ranges::set_difference
+        std::set_difference(notes.begin(), notes.end(), intervals.begin(), intervals.end(),
+                            std::back_inserter(chord.omitted_tones));
+        std::set_difference(intervals.begin(), intervals.end(), notes.begin(), notes.end(),
+                            std::back_inserter(chord.extra_tones));
+        chord.num_accidentals = chord.extra_tones.size() + chord.omitted_tones.size();
+
+        temp.insert(chord);
+    }
+    if (!temp.empty())
+        res.insert(*temp.begin());
+}
+#+end_src
+
+** Why multiset?
+
+Going back to our ~name_that_chord~ function, we see that I have used a
+~multiset~ to store all the candidate names instead of a regular ~set~. The
+reason for this is the comparison operator ~<=>~ that we defined in our ~Chord~
+struct.
+
+Since it is entirely possible that two chords can have the same number of
+accidentals, it is not possible to store both of these chords in a set (if we
+define the operator like that). For this reason, we have to use a ~multiset~
+which allows for two or more entries to be on the same level (or in our case,
+have the same number of accidentals).
+
+* Conclusion
+In this blog we've taken a look at the chord naming algorithm powering
+chordcat. The algorithm has these following steps:
+1. Get all the pressed notes (No duplicates, each note an integer between
+   [0,11]).
+2. Iterate through the set of notes making each of them the root, one at a time.
+3. Get the set of intervals (distances of other notes of the set from the
+   current root)
+4. Take the two-way set difference of this interval set against our database of
+   chord names to get the number of accidentals.
+5. Sort these candidate chord names from the database by the number of
+   accidentals and take the top result(s).
+6. Store the top results for each root note in a ~multiset~ to get our final
+   list of chord names.
+
+Thank you for reading till the end. I hope that you found this interesting and I
+encourage you to use this code (GPL-3.0) in your projects as well. I'm also sure
+that I might have gotten some things wrong from a music theory
+standpoint. Suggestions are always welcome. Please email them to me at s20n AT
+ters.dev.
+
+Until next time!
+

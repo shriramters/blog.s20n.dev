@@ -1,0 +1,19 @@
+baseURL = "https://blog.s20n.dev"
+languageCode = "en-us"
+title = "S20n Blog"
+
+[module]
+  [[module.imports]]
+    disable = false
+    ignoreConfig = false
+    ignoreImports = true
+    path = "github.com/shriramters/plague"  # Theme
+
+[params]
+  siteHeaderText = "S20n Blog"
+
+  colors = "default"
+  
+  [params.hcard]
+    fullName = "Shriram Ravindranathan"
+
