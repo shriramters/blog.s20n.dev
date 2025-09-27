@@ -1,0 +1,412 @@
+#+TITLE: GPG Setup Uncomplicated
+#+DATE: 2025-09-27T10:09:39+05:30
+#+DESCRIPTION: A straighforward GPG Setup that just works
+
+The[[https://www.gnupg.org/documentation/manuals/gnupg/][ GPG manual]] can feel a little.. /cryptic/ sometimes
+/~*ba-dum-tss*~/.
+
+Here's a simple and effective guide to hit the ground
+running with GnuPG.
+
+This guide is mostly based on this great article about [[https://musigma.blog/2021/05/09/gpg-ssh-ed25519.html][using ed25519
+keys with GnuPG]]. I generated my current GPG keys following this
+article a few years ago. There's however, some missing stuff about how
+to get gpg-agent to work with your [A] key for ssh and some other
+things I have discovered over the course of using gpg-agent that I'd
+like to share.
+
+{{< toc >}}
+
+* Key Generation
+
+The keys we will be generating will use ed25519 and cv25519
+algorithms. These algorithms are both based on the [[https://en.wikipedia.org/wiki/Twisted_Edwards_curve][Twisted Edwards
+Curve]]. This is a special family of elliptic curves which is resistant
+to [[https://en.wikipedia.org/wiki/Elliptic-curve_cryptography#Side-channel_attacks][the side-channel attacks]] that other elliptic curves are vulnerable
+to.
+
+Basically, ed25519 is the signing algorithm and cv25519 is its
+encryption counterpart.
+
+We want to generate four keys. Specifically, 1 primary key and 3
+subkeys.
+These are:
+1. *Certificate Key [C]*: Your primary key which will be used for
+   creating and revoking your other keys.
+1. *Authentication Key [A]*: The subkey which will be used for SSH.
+1. *Encryption Key [E]*: The subkey for encrypting and decrypting
+   messages (such as PGP/MIME encrypted emails).
+1. *Signature Key [S]*: The subkey for digitally signing messages
+   (such as PGP/MIME signed emails).
+
+
+Let's begin by generating our Certificate Key.
+
+#+begin_src bash
+  gpg --quick-generate-key \
+    'Your Name <your.email@example.com>' \
+    ed25519 cert never
+#+end_src
+
+When it prompts you to enter a password, make sure you select a
+strong, memorable password that you will remember. Do not store this
+password in a password manager. You need to remember this so that you
+can reliably recall the password when the attacker hits you with [[https://xkcd.com/538][the
+wrench]].
+
+The command will give the output:
+#+begin_example
+We need to generate a lot of random bytes. It is a good idea to perform
+some other action (type on the keyboard, move the mouse, utilize the
+disks) during the prime generation; this gives the random number
+generator a better chance to gain enough entropy.
+gpg: revocation certificate stored as '/home/shriram/.gnupg/openpgp-revocs.d/47BDC6DBB9460CE2471AA2258E9C8FBD1272F630.rev'
+public and secret key created and signed.
+
+pub   ed25519 2025-09-27 [C]
+      47BDC6DBB9460CE2471AA2258E9C8FBD1272F630
+uid                      Your Name <your.email@example.com>
+
+#+end_example
+
+Next, copy the fingerprint of the generated key and save it to a
+variable
+
+#+begin_src bash
+  export KEYFP=47BDC6DBB9460CE2471AA2258E9C8FBD1272F630 # the fingerprint from above
+#+end_src
+
+Now, we can use this main key to generate our 3 subkeys.
+This should prompt you for your main key's password thrice.
+
+#+begin_src bash
+gpg --quick-add-key $KEYFP ed25519 sign 1y
+gpg --quick-add-key $KEYFP cv25519 encr 1y
+gpg --quick-add-key $KEYFP ed25519 auth 1y
+#+end_src
+
+That's it. We have generated the 4 keys that we need. The main key
+does not expire and the three subkeys have a validity of 1 year
+each. (This can be extended by editing the keys using your main key
+later).
+
+At this point, your gpg keychain should look something like this:
+#+begin_src
+  gpg -K
+#+end_src
+
+#+begin_example
+gpg: checking the trustdb
+gpg: marginals needed: 3  completes needed: 1  trust model: pgp
+gpg: depth: 0  valid:   1  signed:   0  trust: 0-, 0q, 0n, 0m, 0f, 1u
+/home/shriram/.gnupg/pubring.kbx
+--------------------------------
+sec   ed25519 2025-09-27 [C]
+      47BDC6DBB9460CE2471AA2258E9C8FBD1272F630
+uid           [ultimate] Your Name <your.email@example.com>
+ssb   ed25519 2025-09-27 [S] [expires: 2026-09-27]
+ssb   cv25519 2025-09-27 [E] [expires: 2026-09-27]
+ssb   ed25519 2025-09-27 [A] [expires: 2026-09-27]
+
+#+end_example
+
+* Configuring GPG for SSH
+
+In order to use your GPG [A] key for SSH, you need to switch your
+system's ~ssh-agent~ with the ~gpg-agent~ that comes with GnuPG.
+
+To do this, open your code editor and add the following lines to your
+=~/.bash_profile= or the equivalent for your shell (e.g., =.zprofile=)
+
+#+begin_src
+  export SSH_AUTH_SOCK=$(gpgconf --list-dirs agent-ssh-socket)
+  gpgconf --launch gpg-agent
+#+end_src
+
+Next, we need to tell GPG which key to use for SSH. We can do that by
+grabbing the keygrip of our [A] key and putting it in GnuPG's
+~sshcontrol~ file.
+
+First, get the keygrip of your [A] key like so:
+#+begin_src
+  gpg -K --with-keygrip
+#+end_src
+
+This should give you an output like:
+
+#+begin_example
+/home/shriram/.gnupg/pubring.kbx
+--------------------------------
+sec   ed25519 2025-09-27 [C]
+      47BDC6DBB9460CE2471AA2258E9C8FBD1272F630
+      Keygrip = 0BECF2A25D3647CCE20BB8486A7426912C14399C
+uid           [ultimate] Your Name <your.email@example.com>
+ssb   ed25519 2025-09-27 [S] [expires: 2026-09-27]
+      Keygrip = 809DB3A0F806CF443114651FC3D67E0C7EEC99C4
+ssb   cv25519 2025-09-27 [E] [expires: 2026-09-27]
+      Keygrip = EB55552C8982AA5E2D3477D6B582A15BC30549D2
+ssb   ed25519 2025-09-27 [A] [expires: 2026-09-27]
+      Keygrip = 7B761F0445CC62FFAA4D2F68416BE178ED066537
+
+#+end_example
+
+Copy the keygrip under the [A] key and put it in the ~sshcontrol~ file
+like so.
+
+#+begin_src bash
+  echo "7B761F0445CC62FFAA4D2F68416BE178ED066537" >> ~/.gnupg/sshcontrol
+#+end_src
+
+Now that we have done the required setup, logout and log back in to
+your desktop for the changes to take effect.
+
+**NOTE** if you are using a code editor for editing these files,
+  please ensure that the file ends with a newline, otherwise GPG will
+  not parse the file properly, especially the ~sshcontrol~ file.
+
+** Pinentry
+
+~gpg-agent~ needs to know which tty to use for launching the pinentry
+program (the program that asks you for your GPG key's password), even
+if it's a GUI program like pinentry-qt.
+
+So we need to update our ~.ssh/config~ file which runs every time you
+try to use SSH, to tell ~gpg-agent~ about the current tty.
+
+Edit ~.ssh/config~ and add this line at the top. (create the file if
+it doesn't exist)
+
+#+begin_src 
+  Match host * exec "gpg-connect-agent UPDATESTARTUPTTY /bye"
+#+end_src
+
+** Export the [A] key in SSH format
+
+Run the following command to export your [A] key in SSH format.
+
+Use the email associated with your certificate key here.
+
+#+begin_src
+  gpg --export-ssh-key your.email@example.com
+#+end_src
+
+This should give you your [A] key's public component in SSH
+format. for example:
+#+begin_example
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGrNLpEGa6DxRqF+fg13PY0p/pwlBvWWcuWv8L23YXUw openpgp:0xC7BC60CC
+#+end_example
+
+You can now use this as your ssh key.
+
+For example, you can add this to your github at
+https://github.com/settings/ssh/new
+
+Give it any name like "my gpg key".
+Once you have submitted that form after pasting that key (the entire
+output of the previous command), you can test that authentication
+works using the following command:
+
+#+begin_src
+ssh -T git@github.com
+#+end_src
+
+This should give you something like the following output:
+(if it prompts to add the host to known_hosts, type yes and hit enter)
+
+#+begin_example
+The authenticity of host 'github.com (20.207.73.82)' can't be established.
+ED25519 key fingerprint is SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU.
+This key is not known by any other names.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added 'github.com' (ED25519) to the list of known hosts.
+Hi shriramters! You've successfully authenticated, but GitHub does not provide shell access.
+#+end_example
+
+** Troubleshooting
+If you get a permission denied (maybe the pinentry window didn't show
+up), make sure you logged out and logged in again as mentioned in one
+of the previous sections.
+
+Ensure that your configuration files ~.ssh/config~,
+~.gnupg/sshcontrol~ etc are proper and have a newline character at the
+end of the file.
+
+Pinentry issues are specific to your operating system and
+desktop environment, so you may need to read the manual for the
+pinentry program you are using and how to configure gpg to use it
+(maybe by editing ~.gnupg/gpg-agent.conf~).
+
+You can also get the ssh command to produce verbose output to clearly
+understand the error.
+#+begin_src
+   ssh -vvT git@github.com
+#+end_src
+
+* Exporting and Importing Subkeys
+
+If you have multiple machines and say you want to use your gpg [A] key to
+access github, [E] key for encrypting emails and [S] key to sign your
+commits, but you don't need your [C] key there, you can export your
+full [A], [E] and [S] keys for use in another machine.
+
+The simplest way is to use:
+#+begin_src
+  gpg --armor --export-secret-subkeys your.email@example.com > ssb-keys.key
+#+end_src
+
+This will export dummy packets for the primary key, so effectively
+only all your subkeys are exported.
+
+If you don't need all the subkeys, you can individually export only
+the required subkeys by their fingerprints.
+
+Like if you only need [A] and [S] key on your other machine:
+#+begin_src
+  gpg -K --with-subkey-fingerprint
+#+end_src
+
+#+begin_example
+/home/shriram/.gnupg/pubring.kbx
+--------------------------------
+sec   ed25519 2025-09-27 [C]
+      47BDC6DBB9460CE2471AA2258E9C8FBD1272F630
+uid           [ultimate] Your Name <your.email@example.com>
+ssb   ed25519 2025-09-27 [S] [expires: 2027-09-27]
+      055BE71F465B5D1762C3393A7D4D5B421D76D88E
+ssb   cv25519 2025-09-27 [E] [expires: 2027-09-27]
+      D019979E67F90A344947EECDBFB31F285CEF4FE8
+ssb   ed25519 2025-09-27 [A] [expires: 2027-09-27]
+      5CFE67C0E17E7909F6BB847D7B1ED4B2C7BC60CC
+
+#+end_example
+
+Now export only [A] and [S] subkeys:
+#+begin_src
+  gpg --armor --export-secret-subkeys "<subkey-S-fingerprint>!" "<subkey-A-fingerprint>!" > a-and-s.key
+#+end_src
+
+#+begin_example
+gpg --armor --export-secret-subkeys "055BE71F465B5D1762C3393A7D4D5B421D76D88E!" "5CFE67C0E17E7909F6BB847D7B1ED4B2C7BC60CC!" > a-and-s.key
+#+end_example
+
+**NOTE** the bang (!) is necessary to prevent the primary key from
+being exported.
+
+Now, copy this =a-and-s.key= file to the other machine and run the
+command:
+
+#+begin_src
+   gpg --import /path/to/a-and-s.key
+#+end_src
+
+This will prompt you for pinentry and then:
+#+begin_example
+gpg: key 8E9C8FBD1272F630: public key "Your Name <your.email@example.com>" imported
+gpg: To migrate 'secring.gpg', with each smartcard, run: gpg --card-status
+gpg: key 8E9C8FBD1272F630: secret key imported
+gpg: Total number processed: 1
+gpg:               imported: 1
+gpg:       secret keys read: 1
+gpg:   secret keys imported: 1
+#+end_example
+
+* Renewing Keys
+
+If your subkeys expired and you want to extend the validity rather
+than generate new keys, you can do that like so:
+
+#+begin_src
+ gpg --edit-key your.email@example.com   
+#+end_src
+
+This should take you to an interactive CLI:
+
+#+begin_example
+gpg (GnuPG) 2.4.7; Copyright (C) 2024 g10 Code GmbH
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Secret key is available.
+
+sec  ed25519/8E9C8FBD1272F630
+     created: 2025-09-27  expires: never       usage: C   
+     trust: ultimate      validity: ultimate
+ssb  ed25519/7D4D5B421D76D88E
+     created: 2025-09-27  expires: 2026-09-27  usage: S   
+ssb  cv25519/BFB31F285CEF4FE8
+     created: 2025-09-27  expires: 2026-09-27  usage: E   
+ssb  ed25519/7B1ED4B2C7BC60CC
+     created: 2025-09-27  expires: 2026-09-27  usage: A   
+[ultimate] (1). Your Name <your.email@example.com>
+
+gpg> 
+#+end_example
+
+We want to select all three subkeys (1, 2 and 3) to extend the expiry
+date for.
+
+At the prompt, type ~key 1~ press enter, type ~key 2~ press enter and
+then type ~key 3~ and press enter.
+
+This will select all three keys and you will see * next to each
+selected subkey.
+#+begin_example
+sec  ed25519/8E9C8FBD1272F630
+     created: 2025-09-27  expires: never       usage: C   
+     trust: ultimate      validity: ultimate
+ssb* ed25519/7D4D5B421D76D88E
+     created: 2025-09-27  expires: 2026-09-27  usage: S   
+ssb* cv25519/BFB31F285CEF4FE8
+     created: 2025-09-27  expires: 2026-09-27  usage: E   
+ssb* ed25519/7B1ED4B2C7BC60CC
+     created: 2025-09-27  expires: 2026-09-27  usage: A   
+[ultimate] (1). Your Name <your.email@example.com>
+
+gpg> 
+#+end_example
+
+Now, enter ~expire~ to edit the expiry date and then enter how long
+you want the key to be valid, for example enter ~2y~ if you want it to
+be valid for 2 years.
+
+#+begin_example
+gpg> expire
+Are you sure you want to change the expiration time for multiple subkeys? (y/N) y
+Please specify how long the key should be valid.
+         0 = key does not expire
+      <n>  = key expires in n days
+      <n>w = key expires in n weeks
+      <n>m = key expires in n months
+      <n>y = key expires in n years
+Key is valid for? (0) 2y
+Key expires at Monday 27 September 2027 09:31:50 AM IST
+Is this correct? (y/N) y
+
+sec  ed25519/8E9C8FBD1272F630
+     created: 2025-09-27  expires: never       usage: C   
+     trust: ultimate      validity: ultimate
+ssb* ed25519/7D4D5B421D76D88E
+     created: 2025-09-27  expires: 2027-09-27  usage: S   
+ssb* cv25519/BFB31F285CEF4FE8
+     created: 2025-09-27  expires: 2027-09-27  usage: E   
+ssb* ed25519/7B1ED4B2C7BC60CC
+     created: 2025-09-27  expires: 2027-09-27  usage: A   
+[ultimate] (1). Your Name <your.email@example.com>
+#+end_example
+
+Finally, enter ~save~ at the prompt to save and exit.
+
+* Closing Words
+
+In this guide, we've seen how to generate an ed25519 certificate key
+and ed25519 and cv25519 keys for Encryption, Authentication, Signing.
+
+We've also seen how we can configure GPG for use with SSH and also how
+to export, import and renew keys.
+
+You should have a pretty decent configuration by now. Next, download
+an email client which supports PGP/MIME and maybe [[https://help.ubuntu.com/community/GnuPrivacyGuardHowto#Uploading_the_key_to_Ubuntu_keyserver][upload your public
+key to a keyserver]] so that others can download it for sending you PGP
+encrypted mail etc.
+
+Thank you for reading!

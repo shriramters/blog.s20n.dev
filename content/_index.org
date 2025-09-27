@@ -3,4 +3,6 @@
 Welcome to my blog.
 
 Here are some featured posts:
-- [[posts/how-chordcat-works][How ChordCat Works, A Chord Naming Algorithm]]
+- [[posts/gpg-setup-uncomplicated][GPG Setup Uncomplicated - a guide to hit the ground running with GPG]]
+- [[posts/how-chordcat-works][How ChordCat Works - a chord naming algorithm]]
+  
